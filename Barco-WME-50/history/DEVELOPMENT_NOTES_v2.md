@@ -1,4 +1,6 @@
-# Barco WME-50 profile v2.06, direct to the wall (no relay)
+# Development notes: v2 direct profile (VwM 4.7 and newer)
+
+How the direct-to-wall profile in `../VwM-4.7-and-newer/` was built and debugged (Oct 2026). Dealers don't need this; see that folder's README for setup.
 
 `barco_wme-50_rest_direct.xml` controls the Video Wall Manager Edge directly. Newer VwM firmware has a REST API "No key" mode, so there's no auth call, no session cookie and no relay server on the Savant Host.
 
@@ -16,7 +18,7 @@ NSInvalidArgumentException: -[NSTaggedPointerString objectForKeyedSubscript:]
   -[httpsIPCommunicator curlResponse:]
 ```
 
-Savant's HTTPS layer runs `checkAccessToken:` on every reply. When the status isn't 200, it gets a short string and treats it as a dictionary. This happens even with `response_required="no"`. Barco answers every set (power, preset, brightness) with `202 Accepted`, as documented in the Barco REST API guide R5916038/12. So no control command can use Savant's `https` on this OS version. **This is a Savant bug worth reporting.** v2.02 (HTTPS) is kept in `../history/profiles/` in case a fixed SavantOS makes it usable again.
+Savant's HTTPS layer runs `checkAccessToken:` on every reply. When the status isn't 200, it gets a short string and treats it as a dictionary. This happens even with `response_required="no"`. Barco answers every set (power, preset, brightness) with `202 Accepted`, as documented in the Barco REST API guide R5916038/12. So no control command can use Savant's `https` on this OS version. **This is a Savant bug worth reporting.** v2.02 (HTTPS) is kept in `profiles/` in case a fixed SavantOS makes it usable again.
 
 v2.03 uses `protocol="tcp-tls"` and writes the HTTP requests itself:
 
@@ -41,7 +43,7 @@ v2.03 uses `protocol="tcp-tls"` and writes the HTTP requests itself:
 1. In VwM, go to **Menu → System settings → Security**, enable the API and choose **No key**.
 2. In Blueprint, add the component and set its IP address to the VwM Edge.
 3. Set the preset-name state variables (`HDMI`, `DisplayPort`, `Profile3`–`Profile7`) to the exact VwM preset names (case-sensitive). This wall's presets are `Default`, `AppleTV`, `Kaleidescape`, `Kaleidescape2` and `Roku`.
-4. If v0.29 was installed, remove `relay_server.py` and its launch agent from the host (see `../current/RELAY_SETUP.md`, section 5).
+4. If v0.29 was installed, remove `relay_server.py` and its launch agent from the host (see `../VwM-4.6-and-older/RELAY_SETUP.md`, section 5).
 
 ## Changes from v0.29
 

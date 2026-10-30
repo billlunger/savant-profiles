@@ -1,8 +1,9 @@
 # Savant Profiles
 
-Savant RacePoint component profiles and helper tools.
+Savant RacePoint component profiles, with setup instructions for dealers.
 
-| Folder | What it is |
+| Device | Profiles |
 | --- | --- |
-| [Barco-WME-50/](Barco-WME-50/) | Barco Video Wall Manager Edge (WME-50) profile, REST API version with a local relay server |
-| [tools/claude-skill/](tools/claude-skill/) | Claude skills for writing and validating Savant profiles |
+| Barco video wall (Video Wall Manager Edge, WME-50) | [Barco-WME-50/](Barco-WME-50/): one profile for VwM firmware 4.7 and newer, one for 4.6 and older |
+
+`tools/claude-skill/` holds Claude skills used to write and validate Savant profiles. Dealers don't need it.
