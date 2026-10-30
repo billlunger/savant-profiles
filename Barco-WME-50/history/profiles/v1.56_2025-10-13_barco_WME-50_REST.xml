@@ -135,7 +135,7 @@
       <action name="PowerOn">
         <command_interface interface="ip">
           <command response_required="yes">
-            <http_header name="Cookie" >sid PwQcXM0Pmbrcgw9vDK5LYrOahL5uQwR5ExgVpAQ9</http_header>
+            <http_header name="Cookie" >sid REDACTED_SESSION_ID</http_header>
             <command_string type="character" http_request_type="POST"></command_string>
             <parameter_list>
               <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_power"/>

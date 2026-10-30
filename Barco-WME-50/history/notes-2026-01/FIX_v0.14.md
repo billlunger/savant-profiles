@@ -11,7 +11,7 @@
 The session cookie was not being stored in Savant's `Session_Cookie` state variable even though the relay server was correctly returning it in the response:
 
 ```
-Response: {"result": "accepted", "session_cookie": "sid=DcBeP93yVvXj0XjAz41wQXLjq0wWd0RYLMv1bLvm"}
+Response: {"result": "accepted", "session_cookie": "sid=REDACTED_SESSION_ID"}
 ```
 
 The relay server was sending the correct data, but Savant's profile was not extracting and storing it.
@@ -105,13 +105,13 @@ When you run Authenticate:
 Relay Server Log:
 [127.0.0.1] ACTION: authenticate
 [127.0.0.1] Attempting to authenticate with Barco at 172.29.1.1 using URL: https://172.29.1.1/api/v1/auth/key
-[127.0.0.1] RESPONSE: {'result': 'accepted', 'session_cookie': 'sid=DcBeP93yVvXj0XjAz41wQXLjq0wWd0RYLMv1bLvm'}
-Sending response: '{"result": "accepted", "session_cookie": "sid=DcBeP93yVvXj0XjAz41wQXLjq0wWd0RYLMv1bLvm"}'
+[127.0.0.1] RESPONSE: {'result': 'accepted', 'session_cookie': 'sid=REDACTED_SESSION_ID'}
+Sending response: '{"result": "accepted", "session_cookie": "sid=REDACTED_SESSION_ID"}'
 
 Savant Behavior:
 1. Receives the response
 2. Parses JSON looking for $.session_cookie
-3. Finds: "sid=DcBeP93yVvXj0XjAz41wQXLjq0wWd0RYLMv1bLvm"
+3. Finds: "sid=REDACTED_SESSION_ID"
 4. Updates Session_Cookie state variable
 5. Subsequent commands now include this cookie
 ```
