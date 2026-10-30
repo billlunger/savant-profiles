@@ -5,7 +5,7 @@
     model="WME-50 REST Direct"
     device_class="HD_monitor"
     minimum_component_engine_version="0.0"
-    rpm_xml_version="2.00"
+    rpm_xml_version="2.06"
     unique_identifier="none">
     <notes>
         Controls a Barco video wall directly through the Video Wall Manager Edge REST API.
@@ -14,19 +14,29 @@
         REQUIREMENTS
         - VwM firmware with the REST API "No key" mode (verified on 4.7.0.3).
           In VwM: Menu > System settings > Security > enable API, select "No key".
-        - Set the component's IP address in Blueprint to the VwM Edge. Port 443 (HTTPS,
-          self-signed certificate).
+        - Set the component's IP address in Blueprint to the VwM Edge.
+
+        WHY RAW HTTP OVER TLS
+        Savant's https protocol crashes the host (avc, SavantOS 11.0.6) on any reply
+        that is not 200: httpsIPCommunicator checkAccessToken treats the status text as a
+        dictionary. Barco answers every control POST with 202 Accepted. This profile
+        therefore opens a TLS socket to port 443 and writes the HTTP/1.1 requests itself.
 
         INPUTS AND PRESETS
         Inputs and profiles are Barco presets. Set each preset-name state variable
-        (HDMI, DisplayPort, Profile3 to Profile7) to the exact preset name in VwM.
+        (HDMI, DisplayPort, Profile3 to Profile7) to the exact preset name in VwM
+        (case-sensitive, 40 characters max).
 
         FEEDBACK
-        Power and brightness are polled every 30 seconds.
+        Power and brightness are polled every 30 seconds (PollStatus).
     </notes>
 
     <control_interfaces preferred="ip" control_optional="false">
-        <ip port="443" protocol="https-insecure" response_time_length_ms="6000" />
+        <ip port="443" protocol="tcp-tls" response_time_length_ms="3000">
+            <receive_end_condition test_condition="data" type="hex">7D</receive_end_condition>
+            <!-- ,"kind" : ends the brightness reply right after the number ({"brightness":50,"kind":...) -->
+            <receive_end_condition test_condition="data" type="hex">2C226B696E6422</receive_end_condition>
+        </ip>
     </control_interfaces>
 
     <media_interfaces>
@@ -50,6 +60,7 @@
         <state_variable name="Power_State" state_center_binding="Power_State" state_center_type="string" owning_logical_component="HD_monitor">idle</state_variable>
         <state_variable name="SelectedInput" state_center_binding="SelectedInput" state_center_type="string" owning_logical_component="HD_monitor" />
         <state_variable name="Screen_Luminance" state_center_binding="Screen_Luminance" state_center_type="integer" owning_logical_component="HD_monitor" min_value="0" max_value="100" />
+        <state_variable name="Screen_Luminance_Text" state_center_binding="Screen_Luminance_Text" state_center_type="string" owning_logical_component="HD_monitor" />
         <state_variable name="Screen_Luminance_High" state_center_binding="Screen_Luminance_High" state_center_type="integer" owning_logical_component="HD_monitor" user_editable="yes" min_value="0" max_value="100">100</state_variable>
         <state_variable name="Screen_Luminance_Med" state_center_binding="Screen_Luminance_Med" state_center_type="integer" owning_logical_component="HD_monitor" user_editable="yes" min_value="0" max_value="100">50</state_variable>
         <state_variable name="Screen_Luminance_Low" state_center_binding="Screen_Luminance_Low" state_center_type="integer" owning_logical_component="HD_monitor" user_editable="yes" min_value="0" max_value="100">25</state_variable>
@@ -60,7 +71,8 @@
         <state_variable name="Profile5" user_editable="yes" state_center_binding="Profile5" state_center_type="string" owning_logical_component="HD_monitor">Profile5</state_variable>
         <state_variable name="Profile6" user_editable="yes" state_center_binding="Profile6" state_center_type="string" owning_logical_component="HD_monitor">Profile6</state_variable>
         <state_variable name="Profile7" user_editable="yes" state_center_binding="Profile7" state_center_type="string" owning_logical_component="HD_monitor">Profile7</state_variable>
-        <state_variable name="Last_Error" state_center_binding="Last_Error" state_center_type="string" owning_logical_component="HD_monitor" />
+        <!-- Preset name wrapped in quotes, sent right-justified so the padding is JSON whitespace, not part of the name -->
+        <state_variable name="PresetQuoted" state_center_binding="PresetQuoted" state_center_type="string" owning_logical_component="HD_monitor" />
     </state_variable_list>
 
     <logical_component logical_component_name="HD_monitor">
@@ -73,349 +85,260 @@
             </input>
         </implementation>
 
+        <!-- Each reply is "HTTP/1.1 200 OK ...headers... {json". Brightness mirrors the power
+             parser (skip to "{", constant, value); its message ends at ,"kind" so the number
+             is the last field (end_of_data). Screen_Luminance_Text gets the same value as a
+             string, to tell a failed integer conversion from a failed match. -->
+        <status_messages>
+            <status_message name="PowerStatus">
+                <data type="character" terminator_type="character" terminator="{" />
+                <constant type="character">"kind":"groups#wall#state","power":"</constant>
+                <data type="character" terminator_type="character" terminator="&quot;">
+                    <update state="Power_State" type="string" />
+                </data>
+            </status_message>
+            <status_message name="PowerStatusBrace">
+                <data type="character" terminator_type="character" terminator="{" />
+                <constant type="character">{"kind":"groups#wall#state","power":"</constant>
+                <data type="character" terminator_type="character" terminator="&quot;">
+                    <update state="Power_State" type="string" />
+                </data>
+            </status_message>
+            <status_message name="BrightnessStatus">
+                <data type="character" terminator_type="character" terminator="{" />
+                <constant type="character">"brightness":</constant>
+                <data type="character" terminator_type="end_of_data">
+                    <update state="Screen_Luminance" type="integer" />
+                    <update state="Screen_Luminance_Text" type="string" />
+                </data>
+            </status_message>
+            <status_message name="BrightnessStatusBrace">
+                <data type="character" terminator_type="character" terminator="{" />
+                <constant type="character">{"brightness":</constant>
+                <data type="character" terminator_type="end_of_data">
+                    <update state="Screen_Luminance" type="integer" />
+                    <update state="Screen_Luminance_Text" type="string" />
+                </data>
+            </status_message>
+        </status_messages>
+
+        <!-- Requests are written as raw HTTP/1.1; &#13;&#10; is CR LF. Content-Length is fixed:
+             power 14/16, brightness 18 (value padded to 3), preset 51 (quoted name padded to 42).
+             Barco replies on the same socket; messages end at "}" (receive_end_condition). -->
         <universal_component_actions>
-            <!-- POWER: POST /api/v1/wall/power {"power":"on"|"idle"} -> 202 {"result":"accepted"} -->
             <action name="PowerOn">
+                <update_state_variable name="Power_State" update_type="set" update_source="constant">on</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/power</command_string>
-                        <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"power":"on"}</parameter>
-                        </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="PowerOnAccepted">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="Power_State" type="string">on</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/power HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 14&#13;&#10;&#13;&#10;{&quot;power&quot;:&quot;on&quot;}</command_string>
                     </command>
                 </command_interface>
             </action>
 
             <action name="PowerOff">
+                <update_state_variable name="Power_State" update_type="set" update_source="constant">idle</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/power</command_string>
-                        <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"power":"idle"}</parameter>
-                        </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="PowerOffAccepted">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="Power_State" type="string">idle</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/power HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 16&#13;&#10;&#13;&#10;{&quot;power&quot;:&quot;idle&quot;}</command_string>
                     </command>
                 </command_interface>
             </action>
 
-            <!-- GET /api/v1/wall/power -> {"kind":"groups#wall#state","power":"on|idle|standby"} -->
             <action name="GetPowerState">
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <command_string type="character" http_request_type="GET">/api/v1/wall/power</command_string>
-                        <response_codes>
-                            <rspmessage status="success" name="PowerState">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.power" matches_required="at_least_one">
-                                        <update state="Power_State" type="string" />
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
+                    <command response_required="no">
+                        <command_string type="character">GET /api/v1/wall/power HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;&#13;&#10;</command_string>
                     </command>
                 </command_interface>
-                <execute_on_schedule period_ms="30000" send_on_reconnect="true" />
             </action>
 
-            <!-- PRESETS: POST /api/v1/wall/preset {"name":"..."} -> 202 accepted; unknown name -> 500 -->
             <action name="SelectInputHDMI">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">HDMI</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">HDMI</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="HDMI" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="HDMISelected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">HDMI</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                            <rspmessage status="failure" name="HDMIPresetError">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.error.message" matches_required="at_least_one">
-                                        <update state="Last_Error" type="string" />
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SelectInputDisplayPort">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">DisplayPort</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">DisplayPort</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="DisplayPort" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="DisplayPortSelected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">DisplayPort</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                            <rspmessage status="failure" name="DisplayPortPresetError">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.error.message" matches_required="at_least_one">
-                                        <update state="Last_Error" type="string" />
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SelectProfile3">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">Profile3</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">Profile3</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Profile3" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="Profile3Selected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">Profile3</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SelectProfile4">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">Profile4</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">Profile4</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Profile4" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="Profile4Selected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">Profile4</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SelectProfile5">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">Profile5</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">Profile5</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Profile5" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="Profile5Selected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">Profile5</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SelectProfile6">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">Profile6</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">Profile6</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Profile6" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="Profile6Selected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">Profile6</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SelectProfile7">
+                <update_state_variable name="PresetQuoted" update_type="set" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="state_variable">Profile7</update_state_variable>
+                <update_state_variable name="PresetQuoted" update_type="append" update_source="constant">&quot;</update_state_variable>
+                <update_state_variable name="SelectedInput" update_type="set" update_source="constant">Profile7</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/preset</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 51&#13;&#10;&#13;&#10;{&quot;name&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"name":"</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Profile7" />
-                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                            <parameter parameter_data_type="character" state_variable="PresetQuoted" parameter_total_width="42" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="Profile7Selected">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one">
-                                        <update state="SelectedInput" type="string">Profile7</update>
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
-            <!-- BRIGHTNESS: POST /api/v1/wall/brightness {"brightness":0-100} -> 202 accepted -->
             <action name="SetBrightness">
                 <action_argument name="Level" note="0-100" />
+                <update_state_variable name="Screen_Luminance" update_type="set" update_source="action_argument">Level</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/brightness</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/brightness HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 18&#13;&#10;&#13;&#10;{&quot;brightness&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"brightness":</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" action_argument="Level" />
-                            <parameter parameter_data_type="character" isHttpBody="true">}</parameter>
+                            <parameter parameter_data_type="character" action_argument="Level" parameter_total_width="3" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="BrightnessAccepted">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one" />
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SetBrightnessHigh">
+                <update_state_variable name="Screen_Luminance" update_type="set" update_source="state_variable">Screen_Luminance_High</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/brightness</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/brightness HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 18&#13;&#10;&#13;&#10;{&quot;brightness&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"brightness":</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Screen_Luminance_High" />
-                            <parameter parameter_data_type="character" isHttpBody="true">}</parameter>
+                            <parameter parameter_data_type="character" state_variable="Screen_Luminance_High" parameter_total_width="3" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="BrightnessHighAccepted">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one" />
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SetBrightnessMed">
+                <update_state_variable name="Screen_Luminance" update_type="set" update_source="state_variable">Screen_Luminance_Med</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/brightness</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/brightness HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 18&#13;&#10;&#13;&#10;{&quot;brightness&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"brightness":</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Screen_Luminance_Med" />
-                            <parameter parameter_data_type="character" isHttpBody="true">}</parameter>
+                            <parameter parameter_data_type="character" state_variable="Screen_Luminance_Med" parameter_total_width="3" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="BrightnessMedAccepted">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one" />
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
             <action name="SetBrightnessLow">
+                <update_state_variable name="Screen_Luminance" update_type="set" update_source="state_variable">Screen_Luminance_Low</update_state_variable>
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <http_header name="Content-Type">application/json</http_header>
-                        <command_string type="character" http_request_type="POST">/api/v1/wall/brightness</command_string>
+                    <command response_required="no">
+                        <command_string type="character">POST /api/v1/wall/brightness HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;Content-Type: application/json&#13;&#10;Content-Length: 18&#13;&#10;&#13;&#10;{&quot;brightness&quot;:</command_string>
                         <parameter_list>
-                            <parameter parameter_data_type="character" isHttpBody="true">{"brightness":</parameter>
-                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="Screen_Luminance_Low" />
-                            <parameter parameter_data_type="character" isHttpBody="true">}</parameter>
+                            <parameter parameter_data_type="character" state_variable="Screen_Luminance_Low" parameter_total_width="3" parameter_justify="right" parameter_fill=" " />
+                            <parameter parameter_data_type="character">}</parameter>
                         </parameter_list>
-                        <response_codes>
-                            <rspmessage status="success" name="BrightnessLowAccepted">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.result" matches_required="at_least_one" />
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
                     </command>
                 </command_interface>
             </action>
 
-            <!-- GET /api/v1/wall/brightness -> {"brightness":50,"maximum":100,"minimum":0,...} -->
             <action name="GetBrightness">
                 <command_interface interface="ip">
-                    <command response_required="yes">
-                        <command_string type="character" http_request_type="GET">/api/v1/wall/brightness</command_string>
-                        <response_codes>
-                            <rspmessage status="success" name="BrightnessState">
-                                <root_object name="none" format="json" matches_required="at_least_one">
-                                    <values path="$.brightness" matches_required="at_least_one">
-                                        <update state="Screen_Luminance" type="integer" />
-                                    </values>
-                                </root_object>
-                            </rspmessage>
-                        </response_codes>
+                    <command response_required="no">
+                        <command_string type="character">GET /api/v1/wall/brightness HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;&#13;&#10;</command_string>
+                    </command>
+                </command_interface>
+            </action>
+            <!-- Polls power, then brightness 1.5 s later. Sent together, both replies land in one
+                 read and Savant only parses the first, so brightness never updated (v2.03). -->
+            <action name="PollStatus">
+                <command_interface interface="ip">
+                    <command response_required="no">
+                        <command_string type="character">GET /api/v1/wall/power HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;&#13;&#10;</command_string>
+                        <delay ms_delay="1500" />
+                    </command>
+                    <command response_required="no">
+                        <command_string type="character">GET /api/v1/wall/brightness HTTP/1.1&#13;&#10;Host: barco-vwm&#13;&#10;&#13;&#10;</command_string>
                     </command>
                 </command_interface>
                 <execute_on_schedule period_ms="30000" send_on_reconnect="true" />
             </action>
         </universal_component_actions>
+
     </logical_component>
 </component>
