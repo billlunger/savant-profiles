@@ -15,7 +15,7 @@ The relay is stateless. Each command carries `api_key` and `barco_ip`, and the r
 | Folder | Contents |
 | --- | --- |
 | `current/` | **v0.29**, the version deployed in the field (Sep 2026): profile, `relay_server.py`, relay setup guide |
-| `next/` | The next version, under development |
+| `next/` | **v2.00** (in testing): talks to the wall directly over HTTPS using the API "No key" mode, so no relay. See [next/README.md](next/README.md) |
 | `reference/text-api-profile/` | Original profile v1.18 using the deprecated Barco TEXT (SCLI) API |
 | `reference/savant/` | Savant profile XSDs and developer guide (not published, see below) |
 | `reference/vendor/` | Barco REST API reference and Python example (not published, see below) |
