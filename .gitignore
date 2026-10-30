@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.pyc
+*.log
+*.pid
+*.pem
+*.key
+
+# Third-party material (Barco API docs/examples, Savant XSDs and guide): kept locally, not published
+Barco-WME-50/reference/vendor/
+Barco-WME-50/reference/savant/
+tools/claude-skill/*/assets/

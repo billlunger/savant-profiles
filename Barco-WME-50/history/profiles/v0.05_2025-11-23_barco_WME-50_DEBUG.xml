@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="racepoint_component_profile.xsd"
+    manufacturer="Barco"
+    model="WME-50_DEBUG"
+    device_class="HD_monitor"
+    minimum_component_engine_version="8.0"
+    rpm_xml_version="0.05"
+    unique_identifier="none">
+
+    <notes>
+        DEBUG PROFILE FOR LOCAL TESTING
+
+        Use this profile with debug_server.py running locally.
+
+        SETUP:
+        1. Run: python3 debug_server.py
+        2. Update DeviceIP below with your local IP (e.g., 127.0.0.1)
+        3. If port isn't 443, add it: 127.0.0.1:8443
+        4. Test individual actions from RPM Terminal
+        5. Watch debug_server.py output to see exactly what's being sent
+
+        TESTING CHECKLIST:
+        - [ ] Set DeviceIP to your local IP
+        - [ ] Trigger "Do_Authenticate" - watch server output
+        - [ ] Check if response appears in server log
+        - [ ] Trigger "PowerOn" - watch server output
+        - [ ] Copy the command from server log, paste in RPM Terminal manually
+        - [ ] Compare working vs non-working requests
+    </notes>
+
+    <!-- Connection Settings -->
+    <control_interfaces preferred="ip" control_optional="false">
+        <ip port="8443" protocol="https" response_time_length_ms="2000"/>
+    </control_interfaces>
+
+    <media_interfaces>
+        <input name_on_component="HDMI">
+            <video_media type="hdmi" />
+            <resource resource_type="AV_MONITOR_SINK" />
+        </input>
+        <data name_on_component="LAN">
+            <combined_media>
+                <data_media type="ethernet" />
+                <control port="8443" />
+            </combined_media>
+        </data>
+    </media_interfaces>
+
+    <state_variable_list>
+        <!-- REQUIRED: Update this with your local IP -->
+        <state_variable name="DeviceIP" user_editable="yes" state_center_type="string" owning_logical_component="HD_monitor">127.0.0.1</state_variable>
+        <state_variable name="API_Key" user_editable="yes" state_center_type="string" owning_logical_component="HD_monitor">TestKey12345678</state_variable>
+
+        <!-- Session storage -->
+        <state_variable name="SessionCookie" state_center_type="string" state_center_binding="internal_only" />
+
+        <!-- Status -->
+        <state_variable name="Power_State" state_center_type="boolean" owning_logical_component="HD_monitor">false</state_variable>
+    </state_variable_list>
+
+    <logical_component logical_component_name="HD_monitor">
+        <implementation>
+            <input name_on_component="HDMI">
+                <action_to_select name="SelectInputHDMI" />
+            </input>
+        </implementation>
+
+        <status_messages>
+            <!-- Parse Set-Cookie from auth response -->
+            <status_message name="Parse_Session_Cookie">
+                <data type="character">Set-Cookie: </data>
+                <data type="character" variable_length="yes" terminator=";" terminator_type="character">
+                    <update_state_variable name="SessionCookie" update_type="set" update_source="state_variable" />
+                </data>
+            </status_message>
+
+            <!-- Parse power state from response -->
+            <status_message name="Parse_Power_On">
+                <data type="character">"power": "on"</data>
+                <run_elements>
+                    <actions>
+                        <action name="SetPowerTrue">
+                            <update_state_variable name="Power_State" update_type="set" update_source="constant">1</update_state_variable>
+                        </action>
+                    </actions>
+                </run_elements>
+            </status_message>
+        </status_messages>
+
+        <custom_component_actions>
+
+            <!-- ============================================================ -->
+            <!-- TEST 1: AUTHENTICATION - Start Here -->
+            <!-- ============================================================ -->
+            <!--
+                This is the simplest possible HTTP request.
+                Run this first and watch the debug_server.py output.
+
+                WHAT TO LOOK FOR:
+                - Is the request appearing in the server log?
+                - Are headers correct?
+                - Is Content-Length correct? (count the JSON body bytes)
+                - Is there a blank line between headers and body?
+                - Does the server log show "Response sent"?
+
+                TO TEST MANUALLY:
+                1. Copy the raw bytes from debug_server.py output
+                2. Paste into RPM Terminal
+                3. See if you get a response
+                4. Compare with what the profile sent
+            -->
+            <action name="Do_Authenticate">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <!-- HTTP Headers (using Savant's native http_header syntax) -->
+                        <http_header name="Host">
+                            <parameter parameter_data_type="character" state_variable="DeviceIP"/>
+                        </http_header>
+                        <http_header name="Content-Type">application/json</http_header>
+                        <http_header name="User-Agent">Savant/1.0</http_header>
+
+                        <!-- HTTP Request Line -->
+                        <command_string type="character" http_request_type="POST">/api/v1/auth/key</command_string>
+
+                        <!-- HTTP Body (JSON) -->
+                        <!-- NOTE: This MUST be exactly 40 bytes or Content-Length will be wrong -->
+                        <!-- Current: {"type":"REST","key":"TestKey12345678"} = 40 bytes -->
+                        <parameter_list>
+                            <parameter parameter_data_type="character" isHttpBody="true">{"type":"REST","key":"</parameter>
+                            <parameter parameter_data_type="character" isHttpBody="true" state_variable="API_Key"/>
+                            <parameter parameter_data_type="character" isHttpBody="true">"}</parameter>
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+
+            <!-- ============================================================ -->
+            <!-- TEST 2: POWER ON - After auth works -->
+            <!-- ============================================================ -->
+            <!--
+                This tests if we can inject the SessionCookie from state variable.
+
+                The critical part is:
+                parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"
+
+                This should inject the cookie value in place of %s
+
+                TO DEBUG:
+                1. Run Do_Authenticate first (to populate SessionCookie)
+                2. Then run PowerOn
+                3. Check if the Cookie header has the session ID
+            -->
+            <action name="PowerOn">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/power HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 15\r\n</command_string>
+                        <parameter_list>
+                            <!-- Inject the session cookie here -->
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                        </parameter_list>
+                        <command_string type="character">\r\n{"power": "on"}</command_string>
+                    </command>
+                </command_interface>
+            </action>
+
+
+            <!-- ============================================================ -->
+            <!-- TEST 3: POWER OFF - Same as PowerOn but different JSON -->
+            <!-- ============================================================ -->
+            <action name="PowerOff">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/power HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 17\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                        </parameter_list>
+                        <command_string type="character">\r\n{"power": "idle"}</command_string>
+                    </command>
+                </command_interface>
+            </action>
+
+
+            <!-- ============================================================ -->
+            <!-- TEST 4: GET STATUS - Tests if GETs work -->
+            <!-- ============================================================ -->
+            <action name="Get_Status">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">GET /api/v1/wall/power HTTP/1.1\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n\r\n" state_variable="SessionCookie"/>
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+
+            <!-- ============================================================ -->
+            <!-- TEST 5: RAW TCP-TLS TEST (for comparison) -->
+            <!-- ============================================================ -->
+            <!--
+                If you want to test raw TCP-TLS (not using http_header tags),
+                uncomment this and test it.
+                This sends the entire request as raw bytes.
+
+                UNCOMMENT THIS TO TEST RAW BYTES:
+            -->
+            <!--
+            <action name="RawTCP_Authenticate">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/auth/key HTTP/1.1\r\nHost: </command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="DeviceIP"/>
+                        </parameter_list>
+                        <command_string type="character">\r\nContent-Type: application/json\r\nContent-Length: 40\r\n\r\n{"type":"REST","key":"TestKey12345678"}</command_string>
+                    </command>
+                </command_interface>
+            </action>
+            -->
+
+        </custom_component_actions>
+
+    </logical_component>
+
+</component>

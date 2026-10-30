@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:noNamespaceSchemaLocation="racepoint_component_profile.xsd"
+  manufacturer="Barco" 
+  model="WME-50_REST" 
+  device_class="HD_monitor"
+  minimum_component_engine_version="0.0" 
+  rpm_xml_version="1.56"
+  unique_identifier="none">
+
+  <notes>
+    Controls Barco Video Wall via REST.
+    1) Login: POST /api/v1/auth/key  --> capture Set-Cookie: sid=...
+    2) Use Cookie on all calls as an HTTP header parameter.
+    Endpoints used: /api/v1/wall/power, /api/v1/wall/brightness, /api/v1/wall/preset
+  </notes>
+
+  <control_interfaces preferred="ip" control_optional="false">
+    <ip port="443" response_time_length_ms="6000" name_on_component="Ethernet" protocol="https-insecure">
+    <http_header name="Cookie" ><parameter parameter_data_type="character" isHttpBody="false" state_variable="SID_COOKIE"/></http_header>
+    <http_header name="Authorization"><parameter parameter_data_type="character" isHttpBody="false" state_variable="SID_COOKIE"/></http_header>
+    </ip>
+  </control_interfaces>
+
+  <media_interfaces>
+    <input name_on_component="HDMI">
+        <video_media type="hdmi" />
+        <resource resource_type="AV_MONITOR_SINK" />
+    </input>
+    <input name_on_component="DisplayPort">
+        <video_media type="display_port" />
+        <resource resource_type="AV_MONITOR_SINK" />
+    </input>
+    <data name_on_component="Ethernet">
+      <combined_media>
+        <data_media type="ethernet"/>
+        <control port="443"/>
+      </combined_media>
+    </data>
+  </media_interfaces>
+
+  <state_variable_list>
+    <state_variable name="API_KEY"          
+        state_center_binding="API_KEY" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor"  
+        user_editable="yes"></state_variable>
+    <state_variable name="url_login"        
+        state_center_binding="url_login" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor" 
+        user_editable="yes">api/v1/auth/key</state_variable>
+    <state_variable name="payload_login"    
+        state_center_binding="payload_login" 
+        state_center_type="string" 
+        owning_logical_component="HD_monitor" 
+        user_editable="yes">{"type":"REST","key":"{API_KEY}"}</state_variable>
+    <state_variable name="url_power"        
+        state_center_binding="url_power" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor" 
+        user_editable="yes">api/v1/wall/power</state_variable>
+    <state_variable name="url_bright"       
+        state_center_binding="url_bright" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor" 
+        user_editable="yes">api/v1/wall/brightness</state_variable>
+    <state_variable name="url_preset"       
+        state_center_binding="url_preset" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor" 
+        user_editable="yes">api/v1/wall/preset</state_variable>
+    <state_variable name="SID_HEADER"       
+        state_center_binding="SID_HEADER" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor"
+        user_editable="yes"></state_variable>
+    <state_variable name="Screen_Luminance" 
+        state_center_binding="Screen_Luminance" 
+        state_center_type="integer" 
+        owning_logical_component="HD_monitor" 
+        user_editable="yes" 
+        min_value="0" 
+        max_value="100">50</state_variable>
+    <state_variable name="HDMI"             
+        state_center_binding="HDMI" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor" 
+        user_editable="yes">HDMI</state_variable>
+    <state_variable name="Power_State"      
+        state_center_binding="Power_State" 
+        state_center_type="string"  
+        owning_logical_component="HD_monitor">STANDBY</state_variable>
+    <!-- <state_variable name="Power_State" state_center_binding="Power_State" state_center_type="string" owning_logical_component="HD_monitor">STANDBY</state_variable>
+    <state_variable name="SelectedInput" state_center_binding="SelectedInput" state_center_type="string" owning_logical_component="HD_monitor" />
+    <state_variable name="Screen_Luminance" state_center_binding="Screen_Luminance" state_center_type="integer" owning_logical_component="HD_monitor" user_editable="yes" min_value="0" max_value="100">50</state_variable>
+    <state_variable name="HDMI" user_editable="yes" state_center_binding="HDMI" state_center_type="string" owning_logical_component="HD_monitor">HDMI</state_variable>
+    <state_variable name="DisplayPort" user_editable="yes" state_center_binding="DisplayPort" state_center_type="string" owning_logical_component="HD_monitor">DisplayPort</state_variable> -->
+  </state_variable_list>
+
+  <logical_component logical_component_name="HD_monitor">
+        <implementation>
+            <input name_on_component="HDMI">
+                <action_to_select name="SelectInputHDMI" />
+            </input>
+        </implementation>
+
+    <universal_component_actions>
+
+      <!-- ==================== LOGIN ==================== -->
+      <action name="Login">
+        <command_interface interface="ip">
+          <command response_required="yes">
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_login"/>
+              <parameter parameter_data_type="character" isHttpBody="true"  state_variable="payload_login"/>
+            </parameter_list>
+
+            <response_codes>
+              <rspmessage status="success" name="CaptureCookie" >
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <!-- <values path="//Set-Cookie:\\s*(sid=[^;\\r\\n]+)" matches_required="at_least_one" regex="true"> -->
+                  <values path="server" matches_required="at_least_one" regex="true">     
+                  <update state="SID_HEADER" type="string">\1</update>
+                  </values>
+                </root_object>
+              </rspmessage>
+            </response_codes>
+          </command>
+        </command_interface>
+      </action>
+
+      <!-- ==================== POWER ==================== -->
+      <action name="PowerOn">
+        <command_interface interface="ip">
+          <command response_required="yes">
+            <http_header name="Cookie" >sid PwQcXM0Pmbrcgw9vDK5LYrOahL5uQwR5ExgVpAQ9</http_header>
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_power"/>
+              <!-- <parameter parameter_data_type="character" isHttpHeader="true" state_variable="SID_HEADER"/> -->
+              <parameter parameter_data_type="character" isHttpBody="true">{"power":"on"}</parameter>
+            </parameter_list>
+            <response_codes>
+              <rspmessage status="success" name="PowerAccepted">
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <values path="\\baccepted\\b" matches_required="at_least_one" regex="true">
+                    <update state="Power_State" type="string">on</update>
+                  </values>
+                </root_object>
+              </rspmessage>
+              <rspmessage status="retry" name="ReloginOn401">
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <values path="HTTP/1\\.1\\s+401" matches_required="at_least_one" regex="true"/>
+                </root_object>
+              </rspmessage>
+            </response_codes>
+          </command>
+          <command when_last_rspmessage="ReloginOn401">
+            <action_call name="Login"/>
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_power"/>
+              <parameter parameter_data_type="character" isHttpBody="true">{"power":"on"}</parameter>
+            </parameter_list>
+          </command>
+        </command_interface>
+      </action>
+
+      <action name="PowerOff">
+        <command_interface interface="ip">
+          <command response_required="yes">
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_power"/>
+              <parameter parameter_data_type="character" isHttpBody="true">{"power":"standby"}</parameter>
+            </parameter_list>
+            <response_codes>
+              <rspmessage status="success" name="PowerAcceptedSB">
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <values path="\\baccepted\\b" matches_required="at_least_one" regex="true">
+                    <update state="Power_State" type="string">standby</update>
+                  </values>
+                </root_object>
+              </rspmessage>
+            </response_codes>
+          </command>
+        </command_interface>
+      </action>
+
+    </universal_component_actions>
+
+    <custom_component_actions>
+
+      ==================== BRIGHTNESS ====================
+      <!-- <action name="SetBrightnessPercent">
+        <command_interface interface="ip">
+          <command response_required="yes">
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_bright"/>
+              <parameter parameter_data_type="character" isHttpHeader="true" state_variable="SID_HEADER"/>
+              <parameter parameter_data_type="character" isHttpBody="true">{"brightness": {Screen_Luminance}}</parameter>
+            </parameter_list>
+            <response_codes>
+              <rspmessage status="success" name="BrightAccepted">
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <values path="\\baccepted\\b" matches_required="at_least_one" regex="true"/>
+                </root_object>
+              </rspmessage>
+              <rspmessage status="retry" name="ReloginOn401B">
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <values path="HTTP/1\\.1\\s+401" matches_required="at_least_one" regex="true"/>
+                </root_object>
+              </rspmessage>
+            </response_codes>
+          </command>
+          <command when_last_rspmessage="ReloginOn401B">
+            <action_call name="Login"/>
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_bright"/>
+              <parameter parameter_data_type="character" isHttpHeader="true" state_variable="SID_HEADER"/>
+              <parameter parameter_data_type="character" isHttpBody="true">{"brightness": {Screen_Luminance}}</parameter>
+            </parameter_list>
+          </command>
+        </command_interface>
+      </action>
+
+      <action name="GetBrightness">
+        <command_interface interface="ip">
+          <command response_required="yes">
+            <command_string type="character" http_request_type="GET"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_bright"/>
+              <parameter parameter_data_type="character" isHttpHeader="true" state_variable="SID_HEADER"/>
+            </parameter_list>
+            <response_codes>
+              <rspmessage status="success" name="ParseBrightness">
+                <root_object name="none" format="text" matches_required="at_least_one">
+                  <values path="\\\"brightness\\\"\\s*:\\s*([0-9]{1,3})" matches_required="at_least_one" regex="true">
+                    <update state="Screen_Luminance" type="integer"/>
+                  </values>
+                </root_object>
+              </rspmessage>
+            </response_codes>
+          </command>
+        </command_interface>
+      </action> -->
+
+      <!-- ==================== PRESETS ==================== -->
+      <action name="SelectInputHDMI">
+        <command_interface interface="ip">
+          <command response_required="no">
+            <command_string type="character"></command_string>
+            <command_string type="character" http_request_type="POST"></command_string>
+            <parameter_list>
+              <parameter parameter_data_type="character" isHttpBody="false" state_variable="url_preset"/>
+              <parameter parameter_data_type="character" isHttpBody="true">{"name":"{HDMI}"}</parameter>
+            </parameter_list>
+          </command>
+        </command_interface>
+      </action>
+                  <!-- <action name="SelectInputHDMI">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character"></command_string>
+                            <parameter_list>
+                                <parameter parameter_data_type="character" >MyWall set SelPreset wall </parameter>
+                                <parameter parameter_data_type="character" state_variable="HDMI" />
+                            </parameter_list>
+                        
+                        <response_codes>
+                            <rspmessage status="success" name="HDMIProfileSet">
+                                <root_object name="none" matches_required="at_least_one" format="text">
+                                    <values path="//done" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action> -->
+
+
+    </custom_component_actions>
+
+    <status_messages/>
+  </logical_component>
+</component>

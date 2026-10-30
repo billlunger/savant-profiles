@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:noNamespaceSchemaLocation="racepoint_component_profile.xsd"
+    manufacturer="Barco"
+    model="WME-50 REST"
+    device_class="HD_monitor"
+    minimum_component_engine_version="0.0"
+    rpm_xml_version="0.27"
+    unique_identifier="none">
+    <notes>
+        This profile uses the REST API via a relay server running on localhost:5000.
+        The relay server is completely stateless - it authenticates with Barco per-request
+        and does not store session state.
+
+        All control actions send api_key and barco_ip directly to the relay server,
+        which handles authentication and relays the command. This eliminates the need
+        for Savant to manage session cookies or refresh them.
+
+        Controls Power On/Off, Input Selection, Brightness, and Preset/Profile Selection.
+        Inputs use HDMI and DisplayPort.
+
+        USAGE:
+        1. Set Barco_IP state variable to your Barco Video Wall Manager IP
+        2. Set API_Key state variable to your Barco API key (from VwM UI Security page)
+        3. Call control actions directly (PowerOn, SetBrightness, etc.)
+           Each action automatically authenticates with Barco and executes the command
+
+        Version 0.26 - Refactored to stateless relay: each control request includes
+        api_key and barco_ip, relay authenticates per-request.
+    </notes>
+
+    <control_interfaces preferred="ip" control_optional="false">
+        <ip port="5000" response_time_length_ms="6000" protocol="tcp">
+            <send_postfix type="hex">0D0A</send_postfix>
+            <receive_end_condition test_condition="data" type="hex">0D0A</receive_end_condition>
+        </ip>
+    </control_interfaces>
+
+    <media_interfaces>
+        <input name_on_component="HDMI">
+            <video_media type="hdmi" />
+            <resource resource_type="AV_MONITOR_SINK" />
+        </input>
+        <input name_on_component="DisplayPort">
+            <video_media type="display_port" />
+            <resource resource_type="AV_MONITOR_SINK" />
+        </input>
+        <data name_on_component="LAN">
+            <combined_media>
+                <data_media type="ethernet" />
+                <control port="5000" />
+            </combined_media>
+        </data>
+    </media_interfaces>
+
+    <state_variable_list>
+        <state_variable name="Barco_IP" user_editable="yes" state_center_binding="Barco_IP" state_center_type="string" owning_logical_component="HD_monitor">172.29.1.1</state_variable>
+        <state_variable name="API_Key" user_editable="yes" state_center_binding="API_Key" state_center_type="string" owning_logical_component="HD_monitor"></state_variable>
+        <state_variable name="Power_State" state_center_binding="Power_State" state_center_type="string" owning_logical_component="HD_monitor">Idle</state_variable>
+        <state_variable name="SelectedInput" state_center_binding="SelectedInput" state_center_type="string" owning_logical_component="HD_monitor" />
+        <state_variable name="Screen_Luminance" state_center_binding="Screen_Luminance" state_center_type="integer" owning_logical_component="HD_monitor" user_editable="yes" min_value="0" max_value="100">50</state_variable>
+        <state_variable name="HDMI" user_editable="yes" state_center_binding="HDMI" state_center_type="string" owning_logical_component="HD_monitor">HDMI</state_variable>
+        <state_variable name="DisplayPort" user_editable="yes" state_center_binding="DisplayPort" state_center_type="string" owning_logical_component="HD_monitor">DisplayPort</state_variable>
+        <state_variable name="Profile3" user_editable="yes" state_center_binding="Profile3" state_center_type="string" owning_logical_component="HD_monitor">Profile3</state_variable>
+        <state_variable name="Profile4" user_editable="yes" state_center_binding="Profile4" state_center_type="string" owning_logical_component="HD_monitor">Profile4</state_variable>
+        <state_variable name="Profile5" user_editable="yes" state_center_binding="Profile5" state_center_type="string" owning_logical_component="HD_monitor">Profile5</state_variable>
+        <state_variable name="Profile6" user_editable="yes" state_center_binding="Profile6" state_center_type="string" owning_logical_component="HD_monitor">Profile6</state_variable>
+        <state_variable name="Profile7" user_editable="yes" state_center_binding="Profile7" state_center_type="string" owning_logical_component="HD_monitor">Profile7</state_variable>
+    </state_variable_list>
+
+    <logical_component logical_component_name="HD_monitor">
+        <implementation>
+            <input name_on_component="HDMI">
+                <action_to_select name="SelectInputHDMI" />
+            </input>
+            <input name_on_component="DisplayPort">
+                <action_to_select name="SelectInputDisplayPort" />
+            </input>
+        </implementation>
+
+        <universal_component_actions>
+            <action name="Authenticate">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"authenticate"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="AuthSuccess">
+                                <constant type="character">Set-Cookie: </constant>
+                                <data type="character" terminator_type="character" terminator=";">
+                                    <update state="Session_Cookie" type="string" />
+                                </data>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="500" />
+                    </command>
+                </command_interface>
+            </action>
+
+<action name="PowerOn">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_power","power_state":"on"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspcode status="success">{"result":"accepted"}</rspcode>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="PowerOff">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_power","power_state":"idle"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspcode status="success">{"result":"accepted"}</rspcode>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile3">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Profile3" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="Profile3Set">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile4">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Profile4" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="Profile4Set">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile5">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Profile5" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="Profile5Set">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile6">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Profile6" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="Profile6Set">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile7">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Profile7" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="Profile7Set">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectInputHDMI">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="HDMI" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="HDMISet">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectInputDisplayPort">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_preset","preset_name":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="DisplayPort" />
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="DisplayPortSet">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="SelectedInput" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SetBrightness">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"set_brightness","brightness":</parameter>
+                            <parameter parameter_data_type="integer" state_variable="Screen_Luminance" />
+                            <parameter parameter_data_type="character">}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="BrightnessSet">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.result" matches_required="at_least_one">
+                                        <update state="Screen_Luminance" type="integer" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="GetBrightness">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"get_brightness"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="BrightnessGet">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.brightness" matches_required="at_least_one">
+                                        <update state="Screen_Luminance" type="integer" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="GetPowerState">
+                <command_interface interface="ip">
+                    <command response_required="yes" http_request_type="POST">
+                        <command_string type="character">{"api_key":"</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" state_variable="API_Key" />
+                            <parameter parameter_data_type="character">","barco_ip":"</parameter>
+                            <parameter parameter_data_type="character" state_variable="Barco_IP" />
+                            <parameter parameter_data_type="character">","action":"get_power"}</parameter>
+                        </parameter_list>
+                        <response_codes>
+                            <rspmessage status="success" name="PowerStateGet">
+                                <root_object name="none" matches_required="at_least_one" format="json">
+                                    <values path="$.power_state" matches_required="at_least_one">
+                                        <update state="Power_State" type="string" />
+                                    </values>
+                                </root_object>
+                            </rspmessage>
+                        </response_codes>
+                        <delay ms_delay="1000" />
+                    </command>
+                </command_interface>
+            </action>
+        </universal_component_actions>
+
+        <status_messages>
+            <status_message name="SelectedInputUpdate">
+                <root_object name="none" matches_required="at_least_one" format="json">
+                    <values path="$.selected_input" matches_required="at_least_one">
+                        <update state="SelectedInput" type="string" />
+                    </values>
+                </root_object>
+            </status_message>
+        </status_messages>
+    </logical_component>
+</component>

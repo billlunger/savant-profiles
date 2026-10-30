@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+    xsi:noNamespaceSchemaLocation="racepoint_component_profile.xsd" 
+    manufacturer="Barco" 
+    model="WME-50_REST" 
+    device_class="HD_monitor" 
+    minimum_component_engine_version="8.0" 
+    rpm_xml_version="0.09"
+    unique_identifier="none">
+    
+    <notes>
+        REST API Version - Authentication Fix (v3)
+        Based on working manual test: 10.0.61.223 auth successful
+
+        KEY CHANGES:
+        1. Auth command uses pre-constructed HTTP request (dynamic parameters)
+        2. Host header INCLUDED (user-editable DeviceIP state variable)
+        3. User-Agent header INCLUDED (Savant/1.0)
+        4. Content-Length: 40 (verified manual byte count)
+        5. API_Key embedded (16 chars, no padding)
+        6. SessionCookie captured from Set-Cookie header response
+
+        REQUIRED USER CONFIGURATION:
+        1. DeviceIP: Enter the device IP address (e.g., 10.0.61.223)
+        2. API_Key: Enter the Barco API security key (16 characters)
+
+        AUTOMATIC PROCESSES:
+        1. Authentication runs every 25 mins (keeps session cookie fresh)
+        2. SessionCookie stored internally (used by all other commands)
+        3. Set-Cookie parsed from auth response automatically
+
+        TESTING CHECKLIST:
+        - Verify DeviceIP is correct (10.0.61.223 in your case)
+        - Verify API_Key is exactly 16 characters
+        - Watch RPM Terminal for full HTTP headers
+        - Check that Set-Cookie header returns from device
+        - Verify SessionCookie state variable is populated
+    </notes>
+
+    <!-- 1. CONNECTION: Secure HTTPS (Raw TLS) -->
+    <!-- 
+        IMPORTANT: For testing with a non-SSL server (e.g. netcat or basic HTTP), 
+        change protocol="tcp-tls" to protocol="tcp".
+        Port 443 is standard for HTTPS. If testing on port 80, update port="80".
+    -->
+    <control_interfaces preferred="ip" control_optional="false">
+        <ip port="443" protocol="tcp-tls" response_time_length_ms="5000"/>
+    </control_interfaces>
+
+    <media_interfaces>
+        <input name_on_component="HDMI">
+            <video_media type="hdmi" />
+            <resource resource_type="AV_MONITOR_SINK" />
+        </input>
+        <input name_on_component="DisplayPort">
+            <video_media type="display_port" />
+            <resource resource_type="AV_MONITOR_SINK" />
+        </input>
+        <data name_on_component="LAN">
+            <combined_media>
+                <data_media type="ethernet" />
+                <control port="443" />
+            </combined_media>
+        </data>
+    </media_interfaces>
+
+    <state_variable_list>
+        <!-- USER CONFIGURATION REQUIRED -->
+        <state_variable name="DeviceIP" user_editable="yes" state_center_type="string" owning_logical_component="HD_monitor">10.0.61.223</state_variable>
+        <state_variable name="API_Key" user_editable="yes" state_center_type="string" owning_logical_component="HD_monitor">INSERT_KEY_HERE</state_variable>
+
+        <!-- INTERNAL STORAGE (DO NOT EDIT) -->
+        <state_variable name="SessionCookie" state_center_type="string" state_center_binding="internal_only" />
+
+        <!-- Standard Variables (Mapped to your Old Profile names) -->
+        <state_variable name="Power_State" state_center_binding="IsPoweredOn" state_center_type="boolean" owning_logical_component="HD_monitor" />
+        <state_variable name="Screen_Luminance" state_center_binding="CurrentScreenBrightness" state_center_type="integer" owning_logical_component="HD_monitor" user_editable="yes" min_value="0" max_value="100">50</state_variable>
+        
+        <!-- User Editable Preset Names (Same as your old profile) -->
+        <state_variable name="Profile3" user_editable="yes" state_center_binding="Profile3" state_center_type="string" owning_logical_component="HD_monitor">Profile3</state_variable>
+        <state_variable name="Profile4" user_editable="yes" state_center_binding="Profile4" state_center_type="string" owning_logical_component="HD_monitor">Profile4</state_variable>
+        <state_variable name="Profile5" user_editable="yes" state_center_binding="Profile5" state_center_type="string" owning_logical_component="HD_monitor">Profile5</state_variable>
+        <state_variable name="Profile6" user_editable="yes" state_center_binding="Profile6" state_center_type="string" owning_logical_component="HD_monitor">Profile6</state_variable>
+        <state_variable name="Profile7" user_editable="yes" state_center_binding="Profile7" state_center_type="string" owning_logical_component="HD_monitor">Profile7</state_variable>
+    </state_variable_list>
+
+    <logical_component logical_component_name="HD_monitor">
+        <implementation>
+            <input name_on_component="HDMI">
+                <!-- Note: REST API uses specific IDs, using preset logic for Inputs is safer if you map them as presets in Barco -->
+                 <action_to_select name="SelectInputHDMI" />
+            </input>
+            <input name_on_component="DisplayPort">
+                 <action_to_select name="SelectInputDisplayPort" />
+            </input>
+        </implementation>
+
+        <!-- 3. FEEDBACK PARSING -->
+        <status_messages>
+            
+            <!-- A. PARSE COOKIE -->
+            <status_message name="Parse_Session_Cookie">
+                <data type="character">Set-Cookie: </data>
+                <data type="character" variable_length="yes" terminator=";" terminator_type="character">
+                    <update_state_variable name="SessionCookie" update_type="set" update_source="state_variable" />
+                </data>
+            </status_message>
+
+            <!-- B. PARSE POWER -->
+            <status_message name="Parse_Power_On">
+                <data type="character">"power": "on"</data>
+                <run_elements>
+                    <actions>
+                        <action name="SetPowerTrue">
+                            <update_state_variable name="Power_State" update_type="set" update_source="constant">1</update_state_variable>
+                        </action>
+                    </actions>
+                </run_elements>
+            </status_message>
+            
+            <status_message name="Parse_Power_Off">
+                <data type="character">"power": "idle"</data> <!-- Or standby -->
+                <run_elements>
+                    <actions>
+                        <action name="SetPowerFalse">
+                            <update_state_variable name="Power_State" update_type="set" update_source="constant">0</update_state_variable>
+                        </action>
+                    </actions>
+                </run_elements>
+            </status_message>
+
+            <!-- C. PARSE BRIGHTNESS -->
+            <status_message name="Parse_Brightness">
+                <data type="character">"brightness": </data>
+                <data type="character" variable_length="yes" terminator="," terminator_type="character">
+                    <update_state_variable name="Screen_Luminance" update_type="set" update_source="state_variable" />
+                </data>
+            </status_message>
+        </status_messages>
+
+        <!-- 4. ACTIONS -->
+        <custom_component_actions>
+
+            <!-- AUTHENTICATION: Complete HTTP request in parameter_list (TEXT API pattern) -->
+            <action name="Do_Authenticate">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <!--
+                        APPROACH: Build entire HTTP request using parameter_list
+                        (Pattern from TEXT API: empty command_string + all content in parameter_list)
+
+                        This avoids Savant's concatenation issues with multiple command_string elements.
+
+                        Expected output:
+                        POST /api/v1/auth/key HTTP/1.1
+                        Host: 10.0.61.223
+                        User-Agent: Savant/1.0
+                        Content-Type: application/json
+                        Content-Length: 40
+                        Connection: close
+
+                        {"type":"REST","key":"YOUR_BARCO_API_KEY"}
+                        -->
+                        <command_string type="character"></command_string>
+
+                        <parameter_list>
+                            <!-- Line 1: Request line -->
+                            <parameter parameter_data_type="character">POST /api/v1/auth/key HTTP/1.1\r\nHost: </parameter>
+
+                            <!-- Device IP from state variable -->
+                            <parameter parameter_data_type="character" state_variable="DeviceIP"/>
+
+                            <!-- Lines 2-4: Headers -->
+                            <parameter parameter_data_type="character">\r\nUser-Agent: Savant/1.0\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 40\r\n\r\n</parameter>
+
+                            <!-- JSON payload opening -->
+                            <parameter parameter_data_type="character">{"type":"REST","key":"</parameter>
+
+                            <!-- API Key from state variable -->
+                            <parameter parameter_data_type="character" state_variable="API_Key"/>
+
+                            <!-- JSON payload closing -->
+                            <parameter parameter_data_type="character">"}</parameter>
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+            <!-- POWER -->
+            <action name="PowerOn">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/power HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 15\r\n</command_string>
+                        <parameter_list>
+                             <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                        </parameter_list>
+                        <command_string type="character">\r\n{"power": "on"}</command_string>
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="PowerOff">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <!-- "idle" is 4 chars, "standby" is 7. Adjust Length accordingly. Using IDLE here. -->
+                        <command_string type="character">POST /api/v1/wall/power HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 17\r\n</command_string>
+                        <parameter_list>
+                             <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                        </parameter_list>
+                        <command_string type="character">\r\n{"power": "idle"}</command_string>
+                    </command>
+                </command_interface>
+            </action>
+
+            <!-- BRIGHTNESS -->
+            <action name="SetBrightness">
+                <command_interface interface="ip">
+                    <command response_required="no">
+                        <!-- Padded to 3 digits to keep length constant (20 bytes) -->
+                        <command_string type="character">POST /api/v1/wall/brightness HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 19\r\n</command_string>
+                        <parameter_list>
+                             <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                             <parameter parameter_data_type="character" parameter_fill='\r\n{"brightness": %3s}' state_variable="Screen_Luminance" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+            <!-- PRESETS (Profiles) -->
+            <!-- We pad the name to 20 characters so Content-Length stays fixed at 33 bytes -->
+            <action name="SelectProfile3">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="Profile3" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile4">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="Profile4" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+            
+             <action name="SelectProfile5">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="Profile5" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectProfile6">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="Profile6" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+             <action name="SelectProfile7">
+                <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="Profile7" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+            
+            <!-- Input Selection (Mapped to Presets/Profiles if needed, or specific commands if API supports) -->
+            <!-- Reusing Presets for Inputs as per typical Wall Logic -->
+            <action name="SelectInputHDMI">
+                 <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="HDMI" /> <!-- Assuming HDMI var holds preset name -->
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+            <action name="SelectInputDisplayPort">
+                 <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">POST /api/v1/wall/preset HTTP/1.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: 32\r\n</command_string>
+                        <parameter_list>
+                            <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n" state_variable="SessionCookie"/>
+                            <parameter parameter_data_type="character" parameter_fill='\r\n{"name": "%-20s"}' state_variable="DisplayPort" />
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+            <!-- POLLING -->
+            <action name="Get_Status">
+                 <command_interface interface="ip">
+                    <command response_required="yes">
+                        <command_string type="character">GET /api/v1/wall/power HTTP/1.1\r\nConnection: close\r\n</command_string>
+                        <parameter_list>
+                             <parameter parameter_data_type="character" parameter_fill="Cookie: %s\r\n\r\n" state_variable="SessionCookie"/>
+                        </parameter_list>
+                    </command>
+                </command_interface>
+            </action>
+
+        </custom_component_actions>
+
+        <!-- 5. AUTOMATION (Pollers) -->
+        <resource_component_actions resource_type="AV_VIDEOPROCESSOR_FUNCTION">
+             <entity name="Main_Processor" address_components="1">
+                
+                <!-- AUTHENTICATION REFRESH -->
+                <!-- Runs every 25 minutes (1,500,000 ms) to keep cookie alive -->
+                <query_status_with_action name="Do_Authenticate" period_ms="1500000" send_on_reconnect="true">
+                    <with_arg name="dummy" address_component="1"/>
+                </query_status_with_action>
+
+                <!-- STATUS POLLING -->
+                <!-- Runs every 30 seconds -->
+                <query_status_with_action name="Get_Status" period_ms="30000">
+                    <with_arg name="dummy" address_component="1"/>
+                </query_status_with_action>
+
+             </entity>
+        </resource_component_actions>
+    </logical_component>
+</component>
